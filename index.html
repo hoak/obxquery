@@ -222,6 +222,33 @@
         } else {
             mainViewer.src = extractImageUrl(null);
         }
+
+        // --- NEW: ARCGIS EXPERIENCE BUILDER COMMUNICATION ---
+        if (house.lat && house.lon) {
+            const lat = parseFloat(house.lat);
+            const lon = parseFloat(house.lon);
+            const zoomLevel = 15;
+
+            try {
+                // This builds the parameters ArcGIS ExB looks for
+                const params = `?center=${lon},${lat}&level=${zoomLevel}`;
+                
+                // We use 'pushState' so the map pans WITHOUT the whole browser refreshing
+                window.parent.history.pushState(null, null, params);
+                
+                console.log("Broadcasting to ExB:", params);
+            } catch (err) {
+                // If this triggers, it's likely a Cross-Origin security block
+                console.warn("External Communication Blocked: Browser security prevents talking to the parent window across different domains.");
+                
+                // Fallback for Demo: If pushState fails, we try a hard refresh of the parent
+                // window.parent.location.search = `center=${lon},${lat}&level=${zoomLevel}`;
+            }
+        }
+
+
+
+        
     }
 
     // DATE PICKER LOGIC (Snap to Saturday)
