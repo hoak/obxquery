@@ -131,7 +131,7 @@
 
         try {
             // Pass the dynamic date to your Python bridge
-            const response = await fetch(`http://127.0.0.1:8000/scrape?date=${dateString}`);
+            const response = await fetch(`https://obx-twiddy-backend-production.up.railway.app/scrape?date=${dateString}`);
             const data = await response.json();
             
             const houses = data.results || [];
