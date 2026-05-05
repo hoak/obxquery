@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Twiddy OBX Browser</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; overflow: hidden; }
+        
+        /* Sidebar Styles */
+        #sidebar { width: 380px; background: white; border-right: 1px solid #ddd; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.05); }
+        .house-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }
+        .house-item:hover { background: #f8faff; }
+        .house-item.active { background: #eef6ff; border-left: 5px solid #007bff; }
+        .price-tag { float: right; font-weight: bold; color: #2d6a4f; background: #d8f3dc; padding: 2px 8px; border-radius: 4px; font-size: 0.9em; }
+        .house-name { display: block; font-weight: bold; margin-bottom: 4px; color: #1a1a1a; }
+        .house-info { font-size: 0.85em; color: #666; }
+        
+        /* Detail Panel Styles */
+        #detail-panel { flex: 1; padding: 40px; overflow-y: auto; display: flex; justify-content: center; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 100%; max-width: 850px; padding: 25px; height: fit-content; }
+        
+        /* Gallery Styles */
+        .viewer-container { width: 100%; position: relative; margin-bottom: 15px; }
+        .main-img { width: 100%; height: 450px; object-fit: cover; border-radius: 8px; background: #eee; transition: opacity 0.2s; }
+        .thumbnail-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; margin-top: 10px; scroll-behavior: smooth; }
+        .thumb { width: 100px; height: 70px; object-fit: cover; border-radius: 4px; cursor: pointer; opacity: 0.6; transition: 0.2s; border: 2px solid transparent; flex-shrink: 0; }
+        .thumb:hover { opacity: 1; }
+        .thumb.active-thumb { opacity: 1; border-color: #007bff; }
+
+        /* Grid Data Styles */
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px; }
+        .box { background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #eee; }
+        .label { font-size: 0.75em; color: #888; text-transform: uppercase; font-weight: bold; }
+        .val { font-size: 1.1em; color: #333; margin-top: 4px; }
+        
+        /* Utilities */
+        .placeholder { text-align: center; color: #aaa; margin-top: 200px; width: 100%; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div style="padding: 20px; background: #007bff; color: white; position: sticky; top:0; z-index:10;">
+        <h2 style="margin:0 0 10px 0">OBX Rentals</h2>
+        
+        <input type="date" id="week-picker" value="2026-07-04" 
+               style="width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-weight: bold; color: #333; cursor: pointer;">
+        
+        <div id="status" style="font-size: 0.9em; opacity: 0.9;">Connecting to Python...</div>
+    </div>
+    <div id="list-container"></div>
+</div>
+
+<div id="detail-panel">
+    <div id="placeholder-view" class="placeholder">
+        <h1>Select a property</h1>
+        <p>Choose a house from the left to view the full gallery.</p>
+    </div>
+
+    <div id="detail-card" class="card hidden">
+        <div class="viewer-container">
+            <img id="main-viewer" class="main-img" src="" alt="House Image" referrerpolicy="no-referrer">
+            <div id="thumbnail-strip" class="thumbnail-strip"></div>
+        </div>
+
+        <h1 id="house-title" style="margin: 10px 0;">House Name</h1>
+        
+        <div class="grid">
+            <div class="box"><div class="label">Town</div><div id="house-town" class="val">-</div></div>
+            <div class="box"><div class="label">Weekly Rate</div><div id="house-price" class="val">-</div></div>
+            <div class="box"><div class="label">Bedrooms</div><div id="house-beds" class="val">-</div></div>
+            <div class="box"><div class="label">GIS Coordinates</div><div id="house-coords" class="val">-</div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // STRICT PARSER: Forces w=420 & h=280 AND guarantees the property-images/ folder
+    const extractImageUrl = (imgData) => {
+        if (!imgData) return 'https://via.placeholder.com/420x280?text=No+Image';
+
+        let id = imgData.id || imgData.imageId || imgData.propertyImageId;
+        let version = imgData.v || imgData.version || imgData.hash || '';
+
+        // 1. If we have the ID, use the exact URL structure
+        if (id) {
+            let queryParams = version ? `v=${version}&` : '';
+            return `https://www.twiddy.com/property-images/${id}?${queryParams}w=420&h=280&mode=crop&q=80&format=webp`;
+        }
+
+        // 2. Fallback: If we only have a raw string/URL
+        let rawStr = typeof imgData === 'string' ? imgData : (imgData.url || imgData.imagePath || imgData.src);
+        
+        if (rawStr) {
+            // Clean up leading slashes
+            if (rawStr.startsWith('/')) rawStr = rawStr.substring(1);
+            
+            // Inject 'property-images/' if it's missing
+            if (!rawStr.includes('property-images/')) {
+                if (rawStr.includes('twiddy.com/')) {
+                    rawStr = rawStr.replace('twiddy.com/', 'twiddy.com/property-images/');
+                } else {
+                    rawStr = `property-images/${rawStr}`;
+                }
+            }
+
+            // Ensure the domain is attached
+            if (!rawStr.startsWith('http')) {
+                rawStr = `https://www.twiddy.com/${rawStr}`;
+            }
+
+            // Strip any old formatting and force 420x280 strict sizing
+            rawStr = rawStr.split('?')[0];
+            return `${rawStr}?w=420&h=280&mode=crop&q=80&format=webp`;
+        }
+
+        return 'https://via.placeholder.com/420x280?text=Error';
+    };
+
+    // MAIN FETCH FUNCTION
+    async function loadData(dateString = '2026-07-04') {
+        const statusEl = document.getElementById('status');
+        const container = document.getElementById('list-container');
+        
+        // UI Reset while loading
+        statusEl.innerText = "Fetching inventory...";
+        container.innerHTML = ''; 
+        document.getElementById('placeholder-view').classList.remove('hidden');
+        document.getElementById('detail-card').classList.add('hidden');
+
+        try {
+            // Pass the dynamic date to your Python bridge
+            const response = await fetch(`http://127.0.0.1:8000/scrape?date=${dateString}`);
+            const data = await response.json();
+            
+            const houses = data.results || [];
+            
+            if (houses.length === 0) {
+                statusEl.innerText = "No houses found for this week.";
+                return;
+            }
+
+            statusEl.innerText = `${houses.length} Houses Available`;
+
+            houses.forEach(house => {
+                const div = document.createElement('div');
+                div.className = 'house-item';
+                div.innerHTML = `
+                    <span class="price-tag">${house.price || 'N/A'}</span>
+                    <span class="house-name">${house.propertyName || 'Unknown'}</span>
+                    <span class="house-info">${house.town || 'OBX'} • ${house.bedrooms || '?'} BR</span>
+                `;
+                div.onclick = () => showHouse(house, div);
+                container.appendChild(div);
+            });
+        } catch (err) {
+            statusEl.innerText = "Python server offline!";
+            console.error(err);
+        }
+    }
+
+    // HOUSE DETAIL RENDERER
+    function showHouse(house, clickedElement) {
+        // UI Highlight
+        document.querySelectorAll('.house-item').forEach(i => i.classList.remove('active'));
+        clickedElement.classList.add('active');
+        
+        // Panel Toggle
+        document.getElementById('placeholder-view').classList.add('hidden');
+        document.getElementById('detail-card').classList.remove('hidden');
+
+        // Text Fields
+        document.getElementById('house-title').innerText = house.propertyName ? `${house.propertyName} (#${house.propertyNumber})` : "Unknown Property";
+        document.getElementById('house-town').innerText = house.town || "Not specified";
+        document.getElementById('house-price').innerText = house.price || "Price Hidden";
+        document.getElementById('house-beds').innerText = house.bedrooms ? `${house.bedrooms} beds` : "N/A";
+        
+        if (house.lat && house.lon) {
+            document.getElementById('house-coords').innerText = `${parseFloat(house.lat).toFixed(5)}, ${parseFloat(house.lon).toFixed(5)}`;
+        } else {
+            document.getElementById('house-coords').innerText = "Coordinates Unavailable";
+        }
+        
+        const mainViewer = document.getElementById('main-viewer');
+        const thumbStrip = document.getElementById('thumbnail-strip');
+        
+        // INSTANT VISUAL RESET: Dim old image, clear thumbnails
+        mainViewer.style.opacity = 0.2; 
+        thumbStrip.innerHTML = ''; 
+        mainViewer.onload = () => { mainViewer.style.opacity = 1; }; // Snap back on load
+
+        // Load Gallery
+        if (house.images && Array.isArray(house.images) && house.images.length > 0) {
+            
+            // Set main image using strict formatting
+            mainViewer.src = extractImageUrl(house.images[0]);
+
+            house.images.forEach((img, index) => {
+                const thumb = document.createElement('img');
+                const exactUrl = extractImageUrl(img);
+                
+                thumb.src = exactUrl;
+                thumb.className = 'thumb' + (index === 0 ? ' active-thumb' : '');
+                
+                // CRITICAL: Prevent browser stall with lazy loading
+                thumb.setAttribute('loading', 'lazy'); 
+                thumb.setAttribute('referrerpolicy', 'no-referrer');
+                
+                thumb.onclick = () => {
+                    mainViewer.style.opacity = 0.5;
+                    setTimeout(() => {
+                        mainViewer.src = exactUrl;
+                    }, 50);
+                    
+                    document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active-thumb'));
+                    thumb.classList.add('active-thumb');
+                };
+                
+                thumbStrip.appendChild(thumb);
+            });
+        } else {
+            mainViewer.src = extractImageUrl(null);
+        }
+    }
+
+    // DATE PICKER LOGIC (Snap to Saturday)
+    document.getElementById('week-picker').addEventListener('change', (e) => {
+        let selectedDate = new Date(e.target.value);
+        let dayOfWeek = selectedDate.getUTCDay(); // 0 = Sun, 6 = Sat
+        
+        if (dayOfWeek !== 6) {
+            // Calculate how many days to add to reach the next Saturday
+            let daysToAdd = (6 - dayOfWeek + 7) % 7;
+            selectedDate.setUTCDate(selectedDate.getUTCDate() + daysToAdd);
+            
+            // Format back to YYYY-MM-DD
+            let correctedDateStr = selectedDate.toISOString().split('T')[0];
+            
+            e.target.value = correctedDateStr;
+            alert(`Rentals run Saturday-to-Saturday. Snapping to: ${correctedDateStr}`);
+            loadData(correctedDateStr);
+        } else {
+            loadData(e.target.value);
+        }
+    });
+
+    // START THE APP
+    loadData(document.getElementById('week-picker').value);
+</script>
+
+</body>
+</html>
